@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "job-hunt-tool"
+version = "0.1.0"
+description = "求职自动化工具箱 — JD匹配、简历优化、求职信生成、投递追踪"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "scikit-learn>=1.0.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+job-hunt = "src.__main__:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/"]
