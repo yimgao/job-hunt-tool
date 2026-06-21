@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "job-hunt-tool"
 version = "0.1.0"
-description = "求职自动化工具箱 — JD匹配、简历优化、求职信生成、投递追踪"
+description = "自主求职智能体 — Hermes驱动的AI求职猎头：自动爬取、LLM匹配、简历定制、自动投递"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
