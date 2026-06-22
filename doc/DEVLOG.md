@@ -379,7 +379,7 @@ JD 提取优先级: Greenhouse `#content` → Lever `.section-content` → Linke
 
 ---
 
-## 当前状态快照（2026-06-22）
+## 当前状态快照（2026-06-22，Phase 5 结束）
 
 ### 已完成
 
@@ -388,7 +388,7 @@ JD 提取优先级: Greenhouse `#content` → Lever `.section-content` → Linke
 - **Extension**: 3-tab MV3，JD 提取 + 匹配分析 + 表单自动填充
 - **测试**: 99 tests passed
 
-### 待完成
+### 待完成（交给 Phase 6）
 
 | 优先级 | 项目 |
 |--------|------|
@@ -399,3 +399,141 @@ JD 提取优先级: Greenhouse `#content` → Lever `.section-content` → Linke
 | 🟡 | Extension `icons/` 目录缺 PNG（安装有 warning）|
 | 🟢 | Workday/iCIMS ATS 更多公司覆盖 |
 | 🟢 | `/api/match` 结果 Redis 缓存（TTL 1h）|
+
+---
+
+## Phase 6 — 部署 + 批量处理 + 认证 + CI
+
+### 6A — Docker 全栈部署
+
+**目标**: 一键 `docker-compose up --build` 跑通全部服务。
+
+#### 文件
+
+| 文件 | 内容 |
+|------|------|
+| `backend/Dockerfile` | 多阶段：python:3.11-slim builder（uv install）+ slim runtime |
+| `frontend/Dockerfile` | Node 20 builder（next build）+ standalone runtime |
+| `backend/.dockerignore` | 排除 .venv, __pycache__, .env, .coverage |
+| `docker-compose.yml` | 新增 `api` + `frontend` 服务，`depends_on: service_healthy` |
+| `frontend/next.config.mjs` | 加 `output: 'standalone'` 支持 Docker 单文件运行 |
+
+**关键设计**:
+- `api` 服务通过 `POSTGRES_URL` / `REDIS_URL` env var 指向内部 docker 网络（`postgres:5432`, `redis:6379`）
+- `frontend` build arg `NEXT_PUBLIC_API_URL=http://localhost:8001`（浏览器直连后端，跳过 Next proxy）
+- healthcheck 保证服务启动顺序
+
+**启动方式**:
+```bash
+cp backend/.env.example backend/.env   # 填入 API keys
+docker-compose up --build
+docker-compose exec api alembic upgrade head
+```
+
+### 6B — Alembic 初始 Migration
+
+文件: `alembic/versions/001_initial_schema.py`
+
+**踩坑**: SQLAlchemy 无法直接 emit `vector(1536)` DDL，解决方案：
+1. 先建 `embedding TEXT` 占位列
+2. 再 `ALTER TABLE resume_chunks ALTER COLUMN embedding TYPE vector(1536) USING NULL::vector(1536)`
+
+迁移顺序: `CREATE EXTENSION vector` → users → jobs → applications → resume_chunks + index
+
+### 6C — 批量 Pipeline（`POST /api/agents/batch`）
+
+**目标**: 每天处理多个职位，而不是每次调用只处理 1 个。
+
+**之前**: `daily_scan.py` 每次调 `/api/agents/run` → 爬取全量 + 处理第 1 个 job
+
+**现在**:
+```
+POST /api/agents/batch { max_jobs: 10, min_score: 0.3 }
+  └─ scraper_node()           # 爬取一次（~14s, ~100 jobs）
+  └─ asyncio.gather(          # 并发匹配所有候选
+       matcher_node(job1),
+       matcher_node(job2), ... )
+  └─ tailor_node(high_match)  # 串行 tailor（避免 LLM 并发限速）
+  └─ tracker_node(each)       # 每个 job 写一条 Application 到 DB
+```
+
+`daily_scan.py` 新增 `--max-jobs N` 参数：
+```bash
+# 单 job（之前行为）
+python scripts/daily_scan.py --resume-file resume.txt
+
+# 批量 10 jobs（新）
+python scripts/daily_scan.py --resume-file resume.txt --max-jobs 10 --min-score 0.4
+```
+
+输出格式：
+```
+Scraped: 97  Processed: 10
+
+  [ 73%] Senior Backend Engineer          @ Stripe                   → tracked:tailor
+  [ 61%] Software Engineer, Infrastructure @ Anthropic               → tracked:tailor
+  [ 34%] Data Engineer                    @ DoorDash                 → tracked:notify
+  ...
+```
+
+### 6D — API Key 认证
+
+文件: `app/api/deps.py`
+
+```python
+def verify_api_key(x_api_key: str = Header(default="")) -> None:
+    if _API_KEY and x_api_key != _API_KEY:
+        raise HTTPException(401, "Invalid or missing X-Api-Key header")
+```
+
+- `API_KEY` 为空（开发默认）→ 全放行，无需改现有开发流程
+- 设置 `API_KEY=xxx` 后，写操作端点强制验证 `X-Api-Key: xxx` 请求头
+- 已保护: `/api/agents/run`, `/api/agents/batch`, `/api/resume/chunks`, `/api/resume/ingest`
+- 未保护（公开只读）: `/api/jobs`, `/api/applications`, `/api/stats/daily`
+
+### 6E — Extension 图标 + 前端类型修复
+
+**Extension 图标**: 用纯 Python（struct + zlib）生成有效 PNG，蓝底（#3b82f6）白色 J 字形，16/48/128px 三尺寸，安装 warning 消除。
+
+**前端 `Application` 类型**:
+- 旧: `status: 'pending' | 'applied' | 'interview' | 'offer' | 'rejected'`（与后端脱节）
+- 新: `status: 'scraped' | 'matched' | 'tailored' | 'applied' | 'rejected' | 'archived'`
+- 补齐 `match_score`, `match_report`, `tailored_cover_letter` 字段
+- Dashboard "Pending Review" 计数器: `matched + tailored`（不再用不存在的 `'pending'`）
+
+### 6F — GitHub Actions CI
+
+文件: `.github/workflows/ci.yml`
+
+两个 job 并发：
+- **Backend**: postgres:pgvector + redis 服务容器，uv install，`pytest -q`
+- **Extension**: npm ci + npm run build（TypeScript 类型检查 + webpack）
+
+---
+
+## 当前状态快照（2026-06-22，Phase 6 结束）
+
+### 已完成
+
+| 层 | 状态 |
+|----|------|
+| 后端 API | 9 路由（+batch），认证依赖，Alembic migration |
+| LangGraph | 5 节点，批量并发处理，DB 全持久化 |
+| Scraper | 7 源，55+ 公司，~100 jobs/14s |
+| 前端 | 4 页面，SWR → 真实 DB，类型正确 |
+| Extension | 3-tab，图标完整，JD 提取 + 分析 + 填表 |
+| 部署 | docker-compose 全栈，Dockerfile × 2 |
+| CI | GitHub Actions，backend tests + extension build |
+| 测试 | 99 passed |
+
+### 下一步（优先级排序）
+
+| 优先级 | 项目 | 原因 |
+|--------|------|------|
+| 🔴 | 集成测试 | CI 目前只跑 unit/API mock 测试，缺端到端真实 DB 测试 |
+| 🔴 | 部署到 Hermes | 目前只有 docker-compose，需要实际服务器配置 |
+| 🟡 | 匹配结果 Redis 缓存 | 相同 resume+JD 重复调 LLM 浪费成本 |
+| 🟡 | CORS 收紧 | 生产环境应限制到具体域名 |
+| 🟡 | 真实用户认证 | 硬编码 default user → JWT / session |
+| 🟢 | Prometheus + Grafana | LLM 成本监控 |
+| 🟢 | daily_scan cron 自动化 | 目前需要手动触发 |
