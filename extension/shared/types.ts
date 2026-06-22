@@ -26,4 +26,24 @@ export interface CompleteTaskRequest {
   note?: string;
 }
 
+export interface PageJobInfo {
+  title: string;
+  company: string;
+  jd_text: string;
+  url: string;
+}
+
+export interface MatchDimensions {
+  [key: string]: number;
+}
+
+export interface MatchReport {
+  match_score: number;
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+  dimensions: MatchDimensions;
+  llm_cost?: number;
+}
+
 export const API_BASE = 'http://localhost:8001';

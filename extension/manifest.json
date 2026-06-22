@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "JobHunt-Flow",
-  "version": "1.0.0",
-  "description": "AI 求职助手 — 自动预填投递表单，由 JobHunt-Flow 驱动",
+  "version": "1.1.0",
+  "description": "AI 求职助手 — 分析职位匹配度，自动预填投递表单",
   "permissions": [
     "storage",
     "clipboardWrite",
     "activeTab",
-    "alarms"
+    "alarms",
+    "tabs"
   ],
   "host_permissions": [
     "http://localhost:8001/*",
@@ -15,7 +16,10 @@
     "https://www.zhipin.com/*",
     "https://*.greenhouse.io/*",
     "https://*.lever.co/*",
-    "https://*.workday.com/*"
+    "https://*.workday.com/*",
+    "https://*.smartrecruiters.com/*",
+    "https://remoteok.com/*",
+    "https://weworkremotely.com/*"
   ],
   "action": {
     "default_popup": "popup/index.html",
@@ -33,7 +37,10 @@
         "https://www.zhipin.com/*",
         "https://*.greenhouse.io/*",
         "https://*.lever.co/*",
-        "https://*.workday.com/*"
+        "https://*.workday.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://remoteok.com/*",
+        "https://weworkremotely.com/*"
       ],
       "js": ["content/inject.js"],
       "run_at": "document_idle"

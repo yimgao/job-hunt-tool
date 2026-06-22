@@ -13,5 +13,6 @@ class AgentState(TypedDict, total=False):
     tailored_resume: str | None
     cover_letter: str | None
     application_id: str | None
+    user_id: str | None
     pipeline_status: str
     errors: list[str]

@@ -56,6 +56,9 @@ GREENHOUSE: list[tuple[str, str, str]] = [
     ("intercom",         "Intercom",            "tier1"),
     ("airtable",         "Airtable",            "tier1"),
     ("chime",            "Chime",               "tier1"),
+    ("scaleai",          "Scale AI",            "tier1"),
+    ("coreweave",        "CoreWeave",           "tier1"),
+    ("samsara",          "Samsara",             "tier1"),
 
     # Series C-D / mid-tier
     ("postman",          "Postman",             "tier2"),
@@ -70,6 +73,7 @@ GREENHOUSE: list[tuple[str, str, str]] = [
     ("netlify",          "Netlify",             "tier2"),
     ("planetscale",      "PlanetScale",         "tier2"),
     ("betterment",       "Betterment",          "tier2"),
+    ("cockroachlabs",    "CockroachDB",         "tier2"),
 ]
 
 # ── Lever  ────────────────────────────────────────────────────────────────────

@@ -1,9 +1,67 @@
-import { API_BASE, ExtensionTask } from '@shared/types';
+import { API_BASE, ExtensionTask, PageJobInfo } from '@shared/types';
 
 const PANEL_ID = 'jh-flow-panel';
 const BTN_ID = 'jh-flow-btn';
 
-// ─── Form field selectors (Greenhouse / Lever / LinkedIn / generic) ──────────
+// ─── JD Extraction ───────────────────────────────────────────────────────────
+
+const JD_SELECTORS: string[] = [
+  // Greenhouse
+  '#content', '.content-intro', '[class*="job-description"]',
+  // Lever
+  '.section-content', '[class*="posting-content"]',
+  // LinkedIn
+  '.jobs-description__content', '.jobs-box__html-content',
+  // SmartRecruiters
+  '[data-testid="job-description"]',
+  // Generic
+  'article', '[class*="description"]', '[id*="description"]',
+  'main',
+];
+
+const TITLE_SELECTORS: string[] = [
+  'h1', '[class*="job-title"]', '[data-testid*="title"]',
+  '.posting-headline h2', '.job-details-jobs-unified-top-card__job-title',
+];
+
+const COMPANY_SELECTORS: string[] = [
+  '[class*="company-name"]', '[class*="employer"]',
+  '.jobs-unified-top-card__company-name a',
+  '[data-testid*="company"]', '.posting-headline .posting-categories',
+];
+
+function extractText(selectors: string[]): string {
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && el.textContent && el.textContent.trim().length > 20) {
+      return el.textContent.trim().replace(/\s+/g, ' ');
+    }
+  }
+  return '';
+}
+
+function extractJobInfo(): PageJobInfo {
+  const title = extractText(TITLE_SELECTORS) || document.title.split('|')[0].trim();
+  const company = extractText(COMPANY_SELECTORS) || '';
+  const jd_text = extractText(JD_SELECTORS) || document.body.innerText.slice(0, 8000);
+  return { title, company, jd_text: jd_text.slice(0, 8000), url: location.href };
+}
+
+// ─── Message listener (popup ↔ content script) ───────────────────────────────
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'EXTRACT_JD') {
+    sendResponse(extractJobInfo());
+    return true;
+  }
+  if (msg.type === 'AUTOFILL' && msg.task) {
+    const n = autofill(msg.task);
+    sendResponse({ filled: n });
+    return true;
+  }
+});
+
+// ─── Form field selectors ─────────────────────────────────────────────────────
 
 const FIELD_SELECTORS: Record<string, string[]> = {
   name: [
