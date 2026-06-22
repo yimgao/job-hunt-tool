@@ -223,7 +223,7 @@ python scripts/daily_scan.py --resume-file /data/resume.txt
 
 ---
 
-## 技术债 & 后续
+## 技术债 & 后续（Phase 4 结束时）
 
 - [ ] `/api/jobs` scraper 接入真实 LinkedIn / Indeed / Boss 直聘
 - [ ] `GET /api/match` 结果缓存（Redis TTL 1h，相同 resume+JD hash 命中）
@@ -231,3 +231,171 @@ python scripts/daily_scan.py --resume-file /data/resume.txt
 - [ ] Prometheus metrics + Grafana 监控 LLM 成本曲线
 - [ ] 生产 CORS 收紧到具体域名
 - [ ] 集成测试（Docker Compose 起 postgres/redis，跑端到端 pipeline）
+
+---
+
+## Phase 5 — 真实数据源 + 前端仪表盘 + DB 持久化
+
+### 5A — 真实多源 Scraper（7 路并发）
+
+**目标**: 替换 mock 数据，接入无需 auth 的公开 API。
+
+#### 数据源架构
+
+```
+ScraperService.scrape()
+  ├─ HNScraper         — Algolia API（HN "Who's Hiring" 月帖）
+  ├─ RemoteOKScraper   — remoteok.com/api（JSON）
+  ├─ WeWorkRemotelyScraper — RSS feed
+  ├─ RemotiveScraper   — remotive.com/api/remote-jobs（REST）
+  ├─ GreenhouseScraper — boards-api.greenhouse.io（55+ 公司）
+  ├─ LeverScraper      — api.lever.co（2 个验证有效的 slug）
+  └─ SmartRecruitersScraper — api.smartrecruiters.com（Canva/Palantir/Uber）
+```
+
+所有 scraper 继承 `ScraperBase`，通过 `asyncio.gather` 并发执行，`Semaphore(6)` 控制 ATS 类单公司并发。实测 100 个去重职位 / 14 秒。
+
+#### 关键踩坑
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| Greenhouse 全返回 404 | URL 用了 `boards.greenhouse.io/api/v1/...` | 正确 URL: `boards-api.greenhouse.io/v1/boards/{slug}/jobs` |
+| RemoteOK 匹配到非技术职位 | 平台把 50+ 站内 tag 都附到每条 job | 只取 `tags[:8]`（前 8 个是职位专属 tag）|
+| HN Scraper 抓到 2015 年帖 | 搜索无日期过滤 | 加 `numericFilters=created_at_i>1700000000` |
+| HN 欧洲职位泄漏 | 未排除 "eu only" / "europe only" 等 | 加排除词列表 |
+| Lever 大量 404 | 大多数公司已迁走 Lever | 仅保留验证有效的 2 个 slug |
+| Ashby 401 | 需要 auth | 放弃，不抓 |
+
+#### 公司列表维护 (`company_list.py`)
+
+通过 live 探测建立并维护已验证 slug 列表（失效 slug 被 scraper 静默跳过）：
+- Greenhouse: 55+ 公司，按 tier 分级（f500 / tier1 / tier2）
+- 含 Stripe、Cloudflare、Anthropic、Scale AI、CoreWeave、Samsara 等
+- Lever: 2 个（Mistral、Highspot）
+- SmartRecruiters: 3 个（Canva、Palantir、Uber）
+
+### 5B — 前端仪表盘（Next.js 14）
+
+**技术选型**: Next.js 14 App Router + Tailwind + SWR + Recharts
+
+#### 页面结构
+
+| 路由 | 功能 |
+|------|------|
+| `/` | Dashboard — 趋势图 + SSE pipeline 实时流 + 成本卡片 |
+| `/jobs` | 职位列表（SWR 轮询） |
+| `/applications` | 投递记录 + 状态筛选 |
+| `/resume` | 简历上传 → ingest → chunk 可视化 |
+
+#### 关键组件
+
+- `StatsChart` — Recharts AreaChart，LinearGradient 填充，`formatter` 不加类型注解（避免 `ValueType` 兼容问题）
+- `PipelineStream` — `fetch` + `ReadableStream` 解析 `data: {...}\n\n` SSE 格式
+- `Sidebar` — 4 个 nav item（Dashboard / Jobs / Applications / Resume）
+
+#### 踩坑
+
+| 问题 | 修复 |
+|------|------|
+| `next.config.ts` not supported（Next 14.2.29）| 改名为 `next.config.mjs` |
+| StatsChart TypeScript `formatter` 类型不兼容 | 去掉显式类型注解 |
+
+#### 后端新 API
+
+- `GET /api/stats/daily` — 7 天 job/application 统计 + 估算成本（`COST_PER_JOB = 0.002`）
+- `POST /api/agents/stream` — SSE，每个 LangGraph node 完成时推送事件
+
+### 5C — DB 持久化（G）
+
+**目标**: 流水线产出真正写入数据库，Dashboard 数据有来源。
+
+#### `app/db/crud.py`
+
+```python
+bulk_upsert_jobs(job_dicts)     # 按 content_hash / source_id 去重，批量插入
+upsert_application(...)         # 创建或更新 Application 行
+get_or_create_default_user()    # 固定 UUID 000...001，首次自动创建
+```
+
+#### 节点更新
+
+**`scraper_node`**（之前只放 state）:
+1. 去重后调 `bulk_upsert_jobs(unique)` → 返回 DB UUID 列表
+2. 将 `db_id` 写回每个 job dict，供下游节点使用
+3. 调 `get_or_create_default_user()` → 写入 `user_id` 到 state
+
+**`tracker_node`**（之前是注释存根）:
+1. 从 state 取 `job.db_id` + `user_id`（UUID 字符串）
+2. 映射 `pipeline_status` → DB status enum（skip→scraped, notify→matched, tailored→tailored）
+3. 调 `upsert_application()` → 返回并记录 application UUID
+
+#### Alembic 设置
+
+- 安装 `alembic>=1.13.0`（uv）
+- `alembic init alembic`
+- `alembic/env.py` 改写为 async 版本（`async_engine_from_config` + `asyncio.run`）
+- 自动导入 `app.db.models` 保证 `Base.metadata` 已注册所有表
+
+### 5D — Extension Analyze Tab（F）+ 公司列表扩展（E）
+
+#### Extension 新增（`v1.1.0`）
+
+**`shared/types.ts`** 新增:
+```typescript
+interface PageJobInfo  { title, company, jd_text, url }
+interface MatchReport  { match_score, summary, strengths, gaps, dimensions }
+```
+
+**`content/inject.ts`** 新增消息监听:
+```typescript
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'EXTRACT_JD') → 多选择器 JD 提取
+  if (msg.type === 'AUTOFILL')  → 表单预填
+})
+```
+
+JD 提取优先级: Greenhouse `#content` → Lever `.section-content` → LinkedIn `.jobs-description__content` → `article` → `main` → `body.innerText[:8000]`
+
+**`popup/App.tsx`** 重构为 3-tab：
+
+| 标签 | 功能 |
+|------|------|
+| 任务 | 现有 pending task 列表 |
+| 分析 | 提取当前页 JD → `/api/match` → 匹配度环形图 + strengths/gaps → "定制简历" 触发 `/api/agents/run` |
+| 设置 | 简历文本输入 + `chrome.storage.local` 持久化 |
+
+**`manifest.json`** v1.1.0:
+- 新增 `tabs` permission（`sendMessage` 到 content script 需要）
+- 新增 host perms: SmartRecruiters + RemoteOK + WeWorkRemotely
+
+#### 公司列表新增（探测 40+ 候选 slug 后确认 4 个）
+
+| slug | 公司 | 职位数 | tier |
+|------|------|--------|------|
+| scaleai | Scale AI | 176 | tier1 |
+| coreweave | CoreWeave | 272 | tier1 |
+| samsara | Samsara | 309 | tier1 |
+| cockroachlabs | CockroachDB | 35 | tier2 |
+
+---
+
+## 当前状态快照（2026-06-22）
+
+### 已完成
+
+- **后端**: 8 个 API 路由，5 节点 LangGraph 流水线，7 路 scraper，DB 持久化
+- **前端**: 4 页面 Next.js 14 Dashboard，SSE 实时流，Recharts 趋势图
+- **Extension**: 3-tab MV3，JD 提取 + 匹配分析 + 表单自动填充
+- **测试**: 99 tests passed
+
+### 待完成
+
+| 优先级 | 项目 |
+|--------|------|
+| 🔴 | Dockerfile + docker-compose 部署 |
+| 🔴 | `alembic revision --autogenerate` + `upgrade head` 建初始 migration |
+| 🟡 | `daily_scan.py` 循环多 job（当前每次只处理 pipeline 第一个 job）|
+| 🟡 | 用户认证（当前硬编码 default user UUID）|
+| 🟡 | Extension `icons/` 目录缺 PNG（安装有 warning）|
+| 🟢 | Workday/iCIMS ATS 更多公司覆盖 |
+| 🟢 | `/api/match` 结果 Redis 缓存（TTL 1h）|
