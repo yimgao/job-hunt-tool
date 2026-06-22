@@ -1,12 +1,13 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Briefcase, FileText } from 'lucide-react'
+import { LayoutDashboard, Briefcase, FileText, Upload } from 'lucide-react'
 
 const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/jobs', label: 'Jobs', icon: Briefcase },
   { href: '/applications', label: 'Applications', icon: FileText },
+  { href: '/resume', label: 'Resume', icon: Upload },
 ]
 
 export default function Sidebar() {

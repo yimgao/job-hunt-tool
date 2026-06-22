@@ -64,6 +64,19 @@ export async function matchJob(resumeText: string, jdText: string): Promise<Matc
   return resp.json()
 }
 
+export interface DailyStat {
+  date: string
+  jobs: number
+  applications: number
+  cost: number
+}
+
+export interface StatsResponse {
+  totals: { jobs: number; applications: number }
+  daily: DailyStat[]
+  cost_total: number
+}
+
 export async function patchApplicationStatus(id: string, status: string): Promise<Application> {
   const resp = await fetch(`${API_BASE}/api/applications/${id}`, {
     method: 'PATCH',
