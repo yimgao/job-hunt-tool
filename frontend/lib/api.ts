@@ -11,12 +11,17 @@ export interface Job {
   created_at: string
 }
 
+export type ApplicationStatus =
+  | 'scraped' | 'matched' | 'tailored' | 'applied' | 'rejected' | 'archived'
+
 export interface Application {
   id: string
   job_id: string
   user_id: string
-  status: 'pending' | 'applied' | 'interview' | 'offer' | 'rejected'
-  resume_used?: string
+  status: ApplicationStatus
+  match_score: number | null
+  match_report: Record<string, unknown> | null
+  tailored_cover_letter: string | null
   created_at: string
   updated_at: string
 }

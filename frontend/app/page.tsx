@@ -20,7 +20,7 @@ export default function Dashboard() {
   const { data: stats } = useSWR<StatsResponse>('/api/stats/daily?days=7', fetcher)
 
   const applied = apps.filter(a => a.status === 'applied').length
-  const pending = apps.filter(a => a.status === 'pending').length
+  const pending = apps.filter(a => a.status === 'matched' || a.status === 'tailored').length
   const totalJobs = stats?.totals.jobs ?? jobs.length
 
   return (

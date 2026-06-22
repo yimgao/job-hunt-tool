@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import verify_api_key
 from app.db.session import get_db
 from app.schemas.resume import ChunkCreate, ChunkResponse, ResumeIngestRequest
 from app.services.vector_store import VectorStore
@@ -11,7 +12,7 @@ from app.services.vector_store import VectorStore
 router = APIRouter(prefix="/api/resume", tags=["resume"])
 
 
-@router.post("/chunks", response_model=ChunkResponse, status_code=201)
+@router.post("/chunks", response_model=ChunkResponse, status_code=201, dependencies=[Depends(verify_api_key)])
 async def add_chunk(
     req: ChunkCreate, db: AsyncSession = Depends(get_db)
 ) -> ChunkResponse:
@@ -21,7 +22,7 @@ async def add_chunk(
     return ChunkResponse(chunk_id=result["chunk_id"], embedding_dim=result["embedding_dim"])
 
 
-@router.post("/ingest", response_model=list[ChunkResponse], status_code=201)
+@router.post("/ingest", response_model=list[ChunkResponse], status_code=201, dependencies=[Depends(verify_api_key)])
 async def ingest_resume(
     req: ResumeIngestRequest, db: AsyncSession = Depends(get_db)
 ) -> list[ChunkResponse]:
