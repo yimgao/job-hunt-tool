@@ -241,7 +241,11 @@ async def test_scraper_service_returns_mock_when_all_fail():
 
     with patch("app.services.scraper.HNScraper.fetch", side_effect=RuntimeError("HN down")), \
          patch("app.services.scraper.RemoteOKScraper.fetch", side_effect=RuntimeError("ROK down")), \
-         patch("app.services.scraper.WeWorkRemotelyScraper.fetch", side_effect=RuntimeError("WWR down")):
+         patch("app.services.scraper.WeWorkRemotelyScraper.fetch", side_effect=RuntimeError("WWR down")), \
+         patch("app.services.scraper.RemotiveScraper.fetch", side_effect=RuntimeError("Remotive down")), \
+         patch("app.services.scraper.GreenhouseScraper.fetch", side_effect=RuntimeError("GH down")), \
+         patch("app.services.scraper.LeverScraper.fetch", side_effect=RuntimeError("LV down")), \
+         patch("app.services.scraper.SmartRecruitersScraper.fetch", side_effect=RuntimeError("SR down")):
 
         service = ScraperService(keywords=["Python"])
         jobs = await service.scrape()
