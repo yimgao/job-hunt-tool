@@ -15,6 +15,8 @@ from app.api.applications import router as applications_router
 from app.api.agents import router as agents_router
 from app.api.extension import router as extension_router
 from app.api.resume import router as resume_router
+from app.api.stats import router as stats_router
+from app.api.stream import router as stream_router
 
 
 @asynccontextmanager
@@ -45,6 +47,8 @@ app.include_router(applications_router)
 app.include_router(agents_router)
 app.include_router(extension_router)
 app.include_router(resume_router)
+app.include_router(stats_router)
+app.include_router(stream_router)
 
 
 @app.get("/health")
